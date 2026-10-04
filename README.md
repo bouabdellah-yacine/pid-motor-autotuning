@@ -1,5 +1,7 @@
 # 🎛️ Régulateur PID de moteur avec auto-réglage (ESP32 + FreeRTOS)
 
+[![Tests](https://github.com/bouabdellah-yacine/pid-motor-autotuning/actions/workflows/ci.yml/badge.svg)](https://github.com/bouabdellah-yacine/pid-motor-autotuning/actions/workflows/ci.yml)
+
 Un ESP32 tient la vitesse d'un moteur à courant continu exactement à la consigne, même quand on freine
 l'arbre. Un bouton lance l'**auto-réglage** : la carte identifie le moteur toute seule, puis calcule les
 gains du régulateur par la méthode **SIMC** (Skogestad), utilisée dans l'industrie.
