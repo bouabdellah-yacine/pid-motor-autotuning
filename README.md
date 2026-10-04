@@ -68,3 +68,7 @@ Commandes dans le moniteur série : `kp 0.0005`, `ki 0.004`, `kd 0`, `aw off`, `
 ```bash
 gcc -O2 -Wall -Wextra -o t test/test_pid.c src/pid.c src/motor_model.c src/tuning.c -lm && ./t
 ```
+
+## Licence
+
+© 2026 Yacine — tous droits réservés. Code publié pour consultation uniquement (voir [`LICENSE`](LICENSE)).
