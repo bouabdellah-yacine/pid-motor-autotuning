@@ -46,14 +46,16 @@ taskDisplay (10 Hz) OLED : courbe consigne / vitesse      (cœur 0)
 | `src/pid.c` | régulateur PID (anti-windup, dérivée filtrée) |
 | `src/tuning.c` | identification du moteur + réglage SIMC |
 | `src/motor_model.c` | jumeau numérique du moteur (R, L, Ke, Kt, J, frottements) |
-| `src/main.cpp` | tâches FreeRTOS, PWM réel (LEDC), OLED, commandes |
+| `src/main.cpp` | tâches FreeRTOS, PWM réel (LEDC), OLED, commandes, serveur web |
+| `src/web_page.h` | dashboard web embarqué : courbe temps réel, gains, modèle identifié (thème clair / sombre) |
 | `test/test_pid.c` | 9 tests : identification, performances, perturbation, anti-windup |
 
 ## Lancer la démo (Wokwi dans VS Code)
 
 1. Ouvre ce dossier dans VS Code → PlatformIO **Build**.
 2. **F1 › Wokwi: Start Simulator**.
-3. Tourne le **potentiomètre** : la consigne change, l'écran trace la consigne (pointillés) et la vitesse.
+3. Ouvre **http://localhost:8182** : le dashboard (courbe en direct, gains, auto-réglage, frein, consigne).
+   Tourne le **potentiomètre** (ou le curseur de la page) : la consigne change, l'écran trace la consigne (pointillés) et la vitesse.
    Avec les gains de départ, la vitesse **oscille** (dépassement ≈ 25 %).
 4. Appuie sur le bouton **bleu « Auto-reglage »** : 5 s d'identification, puis nouveaux gains.
    Tourne à nouveau le potentiomètre : la vitesse rejoint la consigne **sans dépassement**.
