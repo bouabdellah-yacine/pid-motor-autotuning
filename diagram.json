@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "author": "Regulateur PID moteur",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "board-ssd1306", "id": "oled1", "top": 40, "left": 200, "attrs": { "i2cAddress": "0x3c" } },
+    { "type": "wokwi-potentiometer", "id": "pot1", "top": -110, "left": -150, "attrs": { "value": "512" } },
+    { "type": "wokwi-pushbutton", "id": "btn_load", "top": 60, "left": -200, "attrs": { "color": "red", "label": "Frein" } },
+    { "type": "wokwi-pushbutton", "id": "btn_tune", "top": 150, "left": -200, "attrs": { "color": "blue", "label": "Auto-reglage" } },
+    { "type": "wokwi-led", "id": "led_pwm", "top": 230, "left": 40, "attrs": { "color": "orange", "label": "PWM" } },
+    { "type": "wokwi-resistor", "id": "r1", "top": 300, "left": 30, "rotate": 90, "attrs": { "value": "220" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "oled1:VCC", "esp:3V3", "red", [] ],
+    [ "oled1:GND", "esp:GND.2", "black", [] ],
+    [ "oled1:SDA", "esp:21", "blue", [] ],
+    [ "oled1:SCL", "esp:22", "orange", [] ],
+    [ "pot1:VCC", "esp:3V3", "red", [] ],
+    [ "pot1:GND", "esp:GND.1", "black", [] ],
+    [ "pot1:SIG", "esp:34", "violet", [] ],
+    [ "btn_load:1.l", "esp:26", "gray", [] ],
+    [ "btn_load:2.l", "esp:GND.1", "black", [] ],
+    [ "btn_tune:1.l", "esp:27", "gray", [] ],
+    [ "btn_tune:2.l", "esp:GND.1", "black", [] ],
+    [ "led_pwm:A", "esp:2", "orange", [] ],
+    [ "led_pwm:C", "r1:1", "black", [] ],
+    [ "r1:2", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}
