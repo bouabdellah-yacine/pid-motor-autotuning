@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "author": "Regulateur PID moteur",
+  "author": "Yacine",
   "editor": "wokwi",
   "parts": [
     { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
     { "type": "board-ssd1306", "id": "oled1", "top": 40, "left": 200, "attrs": { "i2cAddress": "0x3c" } },
     { "type": "wokwi-potentiometer", "id": "pot1", "top": -110, "left": -150, "attrs": { "value": "512" } },
-    { "type": "wokwi-pushbutton", "id": "btn_load", "top": 60, "left": -200, "attrs": { "color": "red", "label": "Frein" } },
-    { "type": "wokwi-pushbutton", "id": "btn_tune", "top": 150, "left": -200, "attrs": { "color": "blue", "label": "Auto-reglage" } },
+    { "type": "wokwi-pushbutton", "id": "btn_load", "top": 60, "left": -200, "attrs": { "color": "red", "label": "Brake" } },
+    { "type": "wokwi-pushbutton", "id": "btn_tune", "top": 150, "left": -200, "attrs": { "color": "blue", "label": "Auto-tune" } },
     { "type": "wokwi-led", "id": "led_pwm", "top": 230, "left": 40, "attrs": { "color": "orange", "label": "PWM" } },
     { "type": "wokwi-resistor", "id": "r1", "top": 300, "left": 30, "rotate": 90, "attrs": { "value": "220" } }
   ],

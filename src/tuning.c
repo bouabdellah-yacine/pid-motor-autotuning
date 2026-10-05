@@ -3,7 +3,7 @@
 int tune_identify(const float *y, int n, float Ts, float du, fopdt_t *m) {
   if (n < 10 || du == 0) return 0;
   float y0 = y[0], yend = 0;
-  int tail = n / 10;                                    /* moyenne des 10 % finaux */
+  int tail = n / 10;                                    /* average of the last 10% */
   for (int k = n - tail; k < n; k++) yend += y[k];
   yend /= tail;
   float dy = yend - y0;

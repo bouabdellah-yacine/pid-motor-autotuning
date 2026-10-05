@@ -1,22 +1,22 @@
 /*
  * ============================================================================
- *  Régulateur PID de vitesse moteur — ESP32 + FreeRTOS (simulé sur Wokwi)
+ *  PID motor speed controller — ESP32 + FreeRTOS (simulated on Wokwi)
  * ============================================================================
- *  Le potentiomètre règle la consigne (0 à 3000 tr/min). Le régulateur PID
- *  calcule le PWM à envoyer au moteur pour tenir cette vitesse, même quand on
- *  freine l'arbre (bouton rouge). Le bouton bleu lance l'AUTO-RÉGLAGE :
- *  la carte identifie le moteur toute seule puis calcule les meilleurs gains.
+ *  The potentiometer sets the setpoint (0 to 3000 rpm). The PID controller
+ *  computes the PWM to send to the motor to hold that speed, even when the
+ *  shaft is braked (red button). The blue button starts AUTO-TUNING:
+ *  the board identifies the motor on its own, then computes the best gains.
  *
- *  Tâches FreeRTOS (cœur 1 = temps réel, cœur 0 = interface) :
- *    taskMotor    1 kHz  prio 5  « matériel simulé » : moteur DC + codeur
- *    taskControl  100 Hz prio 4  mesure codeur → PID → PWM, auto-réglage, métriques
- *    taskInput    20 Hz  prio 2  potentiomètre, boutons, commandes série
- *    taskDisplay  10 Hz  prio 1  écran OLED : courbe consigne / vitesse
+ *  FreeRTOS tasks (core 1 = real-time, core 0 = user interface):
+ *    taskMotor    1 kHz  prio 5  "simulated hardware": DC motor + encoder
+ *    taskControl  100 Hz prio 4  encoder reading → PID → PWM, auto-tuning, metrics
+ *    taskInput    20 Hz  prio 2  potentiometer, buttons, serial commands
+ *    taskDisplay  10 Hz  prio 1  OLED display: setpoint / speed plot
  *
- *  Dashboard web servi par l'ESP32 : http://localhost:8182 (redirection Wokwi).
+ *  Web dashboard served by the ESP32: http://localhost:8182 (Wokwi port forwarding).
  *
- *  Le code du PID (pid.c), du modèle (motor_model.c) et de l'auto-réglage
- *  (tuning.c) est en C portable, testé sur PC (test/test_pid.c).
+ *  The PID (pid.c), motor model (motor_model.c) and auto-tuning (tuning.c)
+ *  code is portable C, tested on a PC (test/test_pid.c).
  * ============================================================================
  */
 #include <Arduino.h>
@@ -36,16 +36,16 @@
 #define PIN_BTN_TUNE  27
 #define PIN_LED_PWM   2
 #define SP_MAX        3000.0f
-#define TS            0.01f          // période du régulateur : 10 ms
-#define LOAD_TORQUE   0.08f          // couple du frein (N·m)
+#define TS            0.01f          // controller period: 10 ms
+#define LOAD_TORQUE   0.08f          // brake torque (N·m)
 
 Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 
-// --- État partagé (protégé par une section critique) ------------------------
+// --- Shared state (protected by a critical section) -------------------------
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-motor_t motor;                 // le « moteur » (accédé seulement par taskMotor + sections critiques)
-volatile float g_duty = 0;     // PWM appliqué (0..1)
-volatile float g_load = 0;     // couple de charge demandé
+motor_t motor;                 // the "motor" (accessed only by taskMotor + critical sections)
+volatile float g_duty = 0;     // applied PWM (0..1)
+volatile float g_load = 0;     // requested load torque
 volatile float g_setpoint = 1500;
 volatile float g_rpm = 0;
 
@@ -53,31 +53,31 @@ enum Mode { MODE_PID, MODE_TUNE };
 volatile Mode g_mode = MODE_PID;
 volatile int  g_tuneProgress = 0;          // 0..100 %
 volatile bool g_tuneRequest = false;
-volatile bool g_csv = false;               // journal CSV (commande « csv on »)
+volatile bool g_csv = false;               // CSV logging ("csv on" command)
 
 pid_ctrl_t pid;
-SemaphoreHandle_t pidMutex;                // gains modifiables depuis la liaison série
+SemaphoreHandle_t pidMutex;                // gains can be changed over the serial link
 
-// Métriques de la dernière réponse à un échelon
+// Metrics of the last step response
 struct Metrics { float overshoot, tSettle; bool valid, running; };
 volatile Metrics g_metrics = {0, 0, false, false};
 
-// Historique pour la courbe (128 points, un toutes les 50 ms ≈ 6,4 s)
+// History for the plot (128 points, one every 50 ms ≈ 6.4 s)
 #define HIST 128
 float histSp[HIST], histY[HIST];
 volatile int histHead = 0;
 
-// Historique pour la page web (20 points/s, avec numéro de séquence)
+// History for the web page (20 points/s, with sequence number)
 struct Sample { uint32_t seq, t; float sp, y, u; };
 #define WEB_HIST 256
 Sample webHist[WEB_HIST];
 volatile uint32_t webSeq = 0;
-volatile float g_spWeb = -1;               // consigne réglée depuis la page web (-1 = potentiomètre)
-fopdt_t g_model = {0, 0, 0};               // dernier modèle identifié
+volatile float g_spWeb = -1;               // setpoint set from the web page (-1 = potentiometer)
+fopdt_t g_model = {0, 0, 0};               // last identified model
 WebServer server(80);
 
 // ---------------------------------------------------------------------------
-//  PWM réel (LED dont la luminosité suit le rapport cyclique)
+//  Hardware PWM (LED whose brightness follows the duty cycle)
 // ---------------------------------------------------------------------------
 static void pwmInit() {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -97,7 +97,7 @@ static void pwmWrite(float duty) {
 }
 
 // ---------------------------------------------------------------------------
-//  Matériel simulé : moteur + codeur, intégré à 1 kHz
+//  Simulated hardware: motor + encoder, integrated at 1 kHz
 // ---------------------------------------------------------------------------
 void taskMotor(void *) {
   TickType_t last = xTaskGetTickCount();
@@ -118,16 +118,16 @@ static int32_t readEncoder() {
 }
 
 // ---------------------------------------------------------------------------
-//  Régulation 100 Hz + auto-réglage + mesure des performances
+//  100 Hz control loop + auto-tuning + performance measurement
 // ---------------------------------------------------------------------------
 void taskControl(void *) {
   TickType_t last = xTaskGetTickCount();
   int32_t lastCount = readEncoder();
   float y = 0, u = 0, spRef = g_setpoint;
   bool forceStep = false;
-  // métriques
+  // metrics
   float stepFrom = 0, stepTo = 0, peak = 0, inBandSince = -1; uint32_t stepTick = 0;
-  // auto-réglage
+  // auto-tuning
   static float tuneBuf[300];
   int tunePhase = 0, tuneK = 0;
   uint32_t logDiv = 0;
@@ -135,7 +135,7 @@ void taskControl(void *) {
   for (;;) {
     vTaskDelayUntil(&last, pdMS_TO_TICKS(10));
     int32_t c = readEncoder();
-    y = (float)(c - lastCount) / MOTOR_CPR / TS * 60.0f;     // vitesse en tr/min
+    y = (float)(c - lastCount) / MOTOR_CPR / TS * 60.0f;     // speed in rpm
     lastCount = c;
     g_rpm = y;
     float sp = g_setpoint;
@@ -143,8 +143,8 @@ void taskControl(void *) {
     if (g_tuneRequest) { g_tuneRequest = false; g_mode = MODE_TUNE; tunePhase = 0; tuneK = 0; }
 
     if (g_mode == MODE_TUNE) {
-      // Phase 0 : PWM fixe 30 % pendant 2 s (régime établi)
-      // Phase 1 : échelon à 60 % pendant 3 s, on enregistre la vitesse
+      // Phase 0: fixed 30% PWM for 2 s (steady state)
+      // Phase 1: step to 60% for 3 s, recording the speed
       if (tunePhase == 0) {
         u = 0.3f;
         if (++tuneK >= 200) { tunePhase = 1; tuneK = 0; tuneBuf[0] = y; }
@@ -162,15 +162,15 @@ void taskControl(void *) {
             xSemaphoreTake(pidMutex, portMAX_DELAY);
             pid.kp = kp; pid.ki = ki; pid.kd = 0;
             pid_reset(&pid);
-            pid.integ = u;                                  // transition sans à-coup
+            pid.integ = u;                                  // bumpless transfer
             xSemaphoreGive(pidMutex);
-            Serial.printf("# AUTO-REGLAGE : modele K=%.0f tr/min, tau=%.3f s, retard=%.3f s\n", m.K, m.tau, m.theta);
-            Serial.printf("# AUTO-REGLAGE : nouveaux gains Kp=%.6f Ki=%.6f (methode SIMC)\n", kp, ki);
+            Serial.printf("# AUTO-TUNE: model K=%.0f rpm, tau=%.3f s, dead time=%.3f s\n", m.K, m.tau, m.theta);
+            Serial.printf("# AUTO-TUNE: new gains Kp=%.6f Ki=%.6f (SIMC method)\n", kp, ki);
           } else {
-            Serial.println("# AUTO-REGLAGE : echec de l'identification, gains inchanges");
+            Serial.println("# AUTO-TUNE: identification failed, gains unchanged");
           }
           g_mode = MODE_PID;
-          forceStep = true;                                // mesure la performance des nouveaux gains
+          forceStep = true;                                // measure the performance of the new gains
         }
       }
     } else {
@@ -181,8 +181,8 @@ void taskControl(void *) {
     g_duty = u;
     pwmWrite(u);
 
-    // --- Mesure automatique des performances à chaque changement de consigne
-    //     (échelon d'au moins 200 tr/min ; si on tourne encore le bouton, on suit)
+    // --- Automatic performance measurement on every setpoint change
+    //     (step of at least 200 rpm; if the knob is still being turned, follow it)
     if (g_mode == MODE_PID) {
       if (forceStep || fabsf(sp - spRef) >= 200) {
         stepFrom = y; stepTo = sp; spRef = sp; peak = y; inBandSince = -1;
@@ -200,16 +200,16 @@ void taskControl(void *) {
       bool inBand = fabsf(y - stepTo) <= fmaxf(0.05f * span, 20.0f);
       if (inBand) { if (inBandSince < 0) inBandSince = t; }
       else inBandSince = -1;
-      if (inBandSince >= 0 && t - inBandSince >= 0.5f) {            // stable depuis 0,5 s
+      if (inBandSince >= 0 && t - inBandSince >= 0.5f) {            // stable for 0.5 s
         g_metrics.overshoot = span > 0 ? fmaxf(0, (up ? peak - stepTo : stepTo - peak) / span * 100) : 0;
         g_metrics.tSettle = inBandSince;
         g_metrics.valid = true; g_metrics.running = false;
-        Serial.printf("# PERFORMANCE : depassement %.1f %%, stabilisation a 5 %% en %.2f s\n",
+        Serial.printf("# PERFORMANCE: overshoot %.1f%%, settling to 5%% in %.2f s\n",
                       g_metrics.overshoot, g_metrics.tSettle);
-      } else if (t > 10) { g_metrics.running = false; }              // jamais stabilisé
+      } else if (t > 10) { g_metrics.running = false; }              // never settled
     }
 
-    // --- Historique (toutes les 50 ms) et journal CSV (toutes les 100 ms)
+    // --- History (every 50 ms) and CSV log (every 100 ms)
     if (++logDiv % 5 == 0) {
       int h = histHead;
       histSp[h] = sp; histY[h] = y;
@@ -218,15 +218,15 @@ void taskControl(void *) {
       webHist[q % WEB_HIST] = { q + 1, (uint32_t)millis(), sp, y, u };
       webSeq = q + 1;
     }
-    if (g_csv && logDiv % 10 == 0)                                  // CSV pour tracer une courbe
+    if (g_csv && logDiv % 10 == 0)                                  // CSV for plotting
       Serial.printf("%lu,%.0f,%.0f,%.3f\n", (unsigned long)millis(), sp, y, u);
-    else if (!g_csv && logDiv % 100 == 0)                           // résumé chaque seconde
-      Serial.printf("consigne %4.0f tr/min | vitesse %4.0f tr/min | PWM %3.0f %%\n", sp, y, u * 100);
+    else if (!g_csv && logDiv % 100 == 0)                           // summary every second
+      Serial.printf("setpoint %4.0f rpm | speed %4.0f rpm | PWM %3.0f%%\n", sp, y, u * 100);
   }
 }
 
 // ---------------------------------------------------------------------------
-//  Entrées : potentiomètre, boutons, commandes série
+//  Inputs: potentiometer, buttons, serial commands
 // ---------------------------------------------------------------------------
 static void handleCommand(String line) {
   line.trim();
@@ -240,10 +240,10 @@ static void handleCommand(String line) {
   else if (line == "reset") { pid.kp = 0.0002f; pid.ki = 0.006f; pid.kd = 0; pid_reset(&pid); }
   xSemaphoreGive(pidMutex);
   if (line == "tune") g_tuneRequest = true;
-  if (line == "csv on") { g_csv = true; Serial.println("t_ms,consigne_tr_min,vitesse_tr_min,pwm"); }
+  if (line == "csv on") { g_csv = true; Serial.println("t_ms,setpoint_rpm,speed_rpm,pwm"); }
   if (line == "csv off") g_csv = false;
-  Serial.printf("# gains : Kp=%.6f Ki=%.6f Kd=%.6f anti-windup=%s\n", pid.kp, pid.ki, pid.kd,
-                pid.antiwindup ? "oui" : "non");
+  Serial.printf("# gains: Kp=%.6f Ki=%.6f Kd=%.6f anti-windup=%s\n", pid.kp, pid.ki, pid.kd,
+                pid.antiwindup ? "on" : "off");
 }
 
 void taskInput(void *) {
@@ -252,17 +252,17 @@ void taskInput(void *) {
   String line;
   for (;;) {
     potFilt += 0.3f * (analogRead(PIN_POT) - potFilt);
-    float sp = roundf(potFilt / 4095.0f * SP_MAX / 50.0f) * 50.0f;   // pas de 50 tr/min
+    float sp = roundf(potFilt / 4095.0f * SP_MAX / 50.0f) * 50.0f;   // 50 rpm steps
     g_setpoint = g_spWeb >= 0 ? g_spWeb : sp;
 
     bool l = digitalRead(PIN_BTN_LOAD), tb = digitalRead(PIN_BTN_TUNE);
     if (l == LOW && lastLoad == HIGH) {
       g_load = g_load > 0 ? 0 : LOAD_TORQUE;
-      Serial.printf("# FREIN %s (%.2f N.m)\n", g_load > 0 ? "serre" : "relache", (float)g_load);
+      Serial.printf("# BRAKE %s (%.2f N.m)\n", g_load > 0 ? "applied" : "released", (float)g_load);
     }
     if (tb == LOW && lastTune == HIGH && g_mode == MODE_PID) {
       g_tuneRequest = true;
-      Serial.println("# AUTO-REGLAGE demarre : identification du moteur (5 s)");
+      Serial.println("# AUTO-TUNE started: identifying the motor (5 s)");
     }
     lastLoad = l; lastTune = tb;
 
@@ -276,7 +276,7 @@ void taskInput(void *) {
 }
 
 // ---------------------------------------------------------------------------
-//  Écran OLED : courbe consigne (pointillés) et vitesse (trait plein)
+//  OLED display: setpoint plot (dotted) and speed (solid line)
 // ---------------------------------------------------------------------------
 void taskDisplay(void *) {
   const int gTop = 10, gH = 42;
@@ -286,23 +286,23 @@ void taskDisplay(void *) {
     oled.setTextColor(SSD1306_WHITE);
     oled.setTextSize(1);
     oled.setCursor(0, 0);
-    oled.printf("C:%4.0f  V:%4.0f %3.0f%%", (float)g_setpoint, (float)g_rpm, g_duty * 100);
+    oled.printf("S:%4.0f  V:%4.0f %3.0f%%", (float)g_setpoint, (float)g_rpm, g_duty * 100);
 
     int head = histHead;
     int prevY = -1;
     for (int x = 0; x < HIST; x++) {
       int i = (head + x) % HIST;
-      if (x % 3 == 0) oled.drawPixel(x, yPix(histSp[i]), SSD1306_WHITE);  // consigne en pointillés
+      if (x % 3 == 0) oled.drawPixel(x, yPix(histSp[i]), SSD1306_WHITE);  // dotted setpoint
       int py = yPix(histY[i]);
       if (prevY >= 0) oled.drawLine(x - 1, prevY, x, py, SSD1306_WHITE);
       prevY = py;
     }
 
     oled.setCursor(0, 56);
-    if (g_mode == MODE_TUNE) oled.printf("AUTO-REGLAGE %3d%%", (int)g_tuneProgress);
-    else if (g_load > 0) oled.print("FREIN SERRE");
-    else if (g_metrics.valid) oled.printf("Dep:%4.1f%% t5%%:%4.2fs", (float)g_metrics.overshoot, (float)g_metrics.tSettle);
-    else if (g_metrics.running) oled.print("mesure en cours...");
+    if (g_mode == MODE_TUNE) oled.printf("AUTO-TUNE %3d%%", (int)g_tuneProgress);
+    else if (g_load > 0) oled.print("BRAKE ON");
+    else if (g_metrics.valid) oled.printf("OS:%4.1f%% t5%%:%4.2fs", (float)g_metrics.overshoot, (float)g_metrics.tSettle);
+    else if (g_metrics.running) oled.print("measuring...");
     else oled.printf("Kp%.4f Ki%.4f", pid.kp, pid.ki);
     oled.display();
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -310,7 +310,7 @@ void taskDisplay(void *) {
 }
 
 // ---------------------------------------------------------------------------
-//  Dashboard web
+//  Web dashboard
 // ---------------------------------------------------------------------------
 static void webState() {
   static char buf[12288];
@@ -337,8 +337,8 @@ static void webState() {
 static void webCmd() {
   String c = server.arg("c"), v = server.arg("v");
   if (c == "sp") g_spWeb = constrain(v.toFloat(), -1.0f, SP_MAX);
-  else if (c == "tune") { if (g_mode == MODE_PID) { g_tuneRequest = true; Serial.println("# AUTO-REGLAGE demarre (page web)"); } }
-  else if (c == "brake") { g_load = g_load > 0 ? 0 : LOAD_TORQUE; Serial.printf("# FREIN %s (page web)\n", g_load > 0 ? "serre" : "relache"); }
+  else if (c == "tune") { if (g_mode == MODE_PID) { g_tuneRequest = true; Serial.println("# AUTO-TUNE started (web page)"); } }
+  else if (c == "brake") { g_load = g_load > 0 ? 0 : LOAD_TORQUE; Serial.printf("# BRAKE %s (web page)\n", g_load > 0 ? "applied" : "released"); }
   else if (c == "aw") handleCommand(pid.antiwindup ? "aw off" : "aw on");
   else if (c == "reset") handleCommand("reset");
   else if (c == "kp" || c == "ki") handleCommand(c + " " + v);
@@ -351,15 +351,15 @@ void setup() {
   pinMode(PIN_BTN_TUNE, INPUT_PULLUP);
   pwmInit();
   Wire.begin(21, 22);
-  if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("# ERREUR : ecran OLED introuvable");
+  if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C)) Serial.println("# ERROR: OLED display not found");
 
   motor_init(&motor);
-  pid_init(&pid, 0.0002f, 0.006f, 0.0f, TS);        // réglage manuel volontairement médiocre
+  pid_init(&pid, 0.0002f, 0.006f, 0.0f, TS);        // deliberately poor manual tuning
   pidMutex = xSemaphoreCreateMutex();
   for (int i = 0; i < HIST; i++) { histSp[i] = 0; histY[i] = 0; }
 
-  Serial.println("# Regulateur PID moteur pret. Potentiometre = consigne, rouge = frein, bleu = auto-reglage");
-  Serial.println("# Commandes : kp <v>, ki <v>, kd <v>, aw on|off, tune, reset, csv on|off");
+  Serial.println("# PID motor controller ready. Potentiometer = setpoint, red = brake, blue = auto-tune");
+  Serial.println("# Commands: kp <v>, ki <v>, kd <v>, aw on|off, tune, reset, csv on|off");
 
   xTaskCreatePinnedToCore(taskMotor,   "motor",   2048, NULL, 5, NULL, 1);
   xTaskCreatePinnedToCore(taskControl, "control", 4096, NULL, 4, NULL, 1);
@@ -372,7 +372,7 @@ void setup() {
   server.on("/api/state", webState);
   server.on("/api/cmd", webCmd);
   server.begin();
-  Serial.printf("# Dashboard web : http://localhost:8182 (Wi-Fi %s)\n", WiFi.status() == WL_CONNECTED ? "OK" : "non connecte");
+  Serial.printf("# Web dashboard: http://localhost:8182 (Wi-Fi %s)\n", WiFi.status() == WL_CONNECTED ? "OK" : "not connected");
 }
 
 void loop() {

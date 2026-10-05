@@ -1,11 +1,11 @@
-/* Boucle fermée simulée sur PC : même code PID que sur l'ESP32, moteur virtuel. */
+/* Closed loop simulated on a PC: same PID code as on the ESP32, virtual motor. */
 #pragma once
 #include "../src/motor_model.h"
 #include "../src/pid.h"
 
 typedef struct { float overshoot, t_settle, err_final, peak; } step_metrics_t;
 
-/* Mesure de vitesse comme sur la carte : différence de codeur sur Ts */
+/* Speed measurement as on the board: encoder count difference over Ts */
 static inline float measure_rpm(int32_t *last, const motor_t *m, float Ts) {
   int32_t c = motor_encoder(m);
   float rpm = (float)(c - *last) / MOTOR_CPR / Ts * 60.0f;
@@ -13,13 +13,13 @@ static inline float measure_rpm(int32_t *last, const motor_t *m, float Ts) {
   return rpm;
 }
 
-/* Simule un échelon de consigne sp0 → sp1 ; optionnel : charge à t_load */
+/* Simulates a setpoint step sp0 → sp1; optional: load applied at t_load */
 static inline step_metrics_t sim_step(pid_ctrl_t *p, float sp0, float sp1, float t_total,
                                       float t_load, float load, float *trace, int trace_n) {
   motor_t m; motor_init(&m);
   int32_t last = 0; float y = 0;
   pid_reset(p);
-  /* préchauffe à sp0 */
+  /* warm-up at sp0 */
   for (int k = 0; k < 300; k++) {
     float u = pid_update(p, sp0, y);
     for (int s = 0; s < 10; s++) motor_step(&m, u, p->Ts / 10);
@@ -47,7 +47,7 @@ static inline step_metrics_t sim_step(pid_ctrl_t *p, float sp0, float sp1, float
   (void)last_out;
   r.overshoot = sp1 > sp0 ? (r.peak - sp1) / (sp1 - sp0) * 100.0f : 0;
   if (r.overshoot < 0) r.overshoot = 0;
-  /* erreur finale : moyenne des 0,5 dernières secondes */
+  /* final error: average over the last 0.5 s */
   float acc = 0; int cnt = 0;
   for (int k = 0; k < 50; k++) {
     float u = pid_update(p, sp1, y);

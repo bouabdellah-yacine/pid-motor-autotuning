@@ -1,8 +1,8 @@
 /*
- * Régulateur PID discret, version « industrielle » :
- *  - dérivée sur la MESURE (pas de coup de bélier quand la consigne change)
- *  - filtre passe-bas sur la dérivée (le bruit du codeur n'est pas amplifié)
- *  - anti-emballement de l'intégrale (anti-windup par recalcul) quand le PWM sature
+ * Discrete PID controller, industrial-grade version:
+ *  - derivative on MEASUREMENT (no derivative kick when the setpoint changes)
+ *  - low-pass filter on the derivative (encoder noise is not amplified)
+ *  - integrator windup protection (back-calculation anti-windup) when the PWM saturates
  */
 #pragma once
 #ifdef __cplusplus
@@ -10,12 +10,12 @@ extern "C" {
 #endif
 
 typedef struct {
-  float kp, ki, kd;        /* gains (sortie = rapport cyclique 0..1, erreur en tr/min) */
-  float Ts;                /* période d'échantillonnage (s) */
-  float tf;                /* constante du filtre de dérivée (s) */
-  float umin, umax;        /* limites de la commande */
-  int   antiwindup;        /* 1 = actif */
-  /* état interne */
+  float kp, ki, kd;        /* gains (output = duty cycle 0..1, error in rpm) */
+  float Ts;                /* sampling period (s) */
+  float tf;                /* derivative filter time constant (s) */
+  float umin, umax;        /* output limits */
+  int   antiwindup;        /* 1 = enabled */
+  /* internal state */
   float integ, deriv, prev_meas;
   int   first;
 } pid_ctrl_t;

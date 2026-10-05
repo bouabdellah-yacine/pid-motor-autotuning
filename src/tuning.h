@@ -1,9 +1,9 @@
 /*
- * Auto-réglage : identification du moteur par un essai indicielle puis réglage
- * du PI par la méthode SIMC de Skogestad (robuste, utilisée en industrie).
- *  1. on applique un échelon de PWM et on enregistre la vitesse
- *  2. on en déduit un modèle « 1er ordre + retard » : gain K, constante τ, retard θ
- *     (méthode des deux points : 28,3 % et 63,2 % de la réponse)
+ * Auto-tuning: motor identification from a step test, then PI tuning
+ * with Skogestad's SIMC method (robust, widely used in industry).
+ *  1. apply a PWM step and record the speed
+ *  2. derive a first-order-plus-dead-time model: gain K, time constant τ, dead time θ
+ *     (two-point method: 28.3% and 63.2% of the response)
  *  3. Kp = τ / (K (τc + θ)),  Ti = min(τ, 4 (τc + θ))
  */
 #pragma once
@@ -13,9 +13,9 @@ extern "C" {
 
 typedef struct { float K, tau, theta; } fopdt_t;
 
-/* y : vitesses mesurées après l'échelon (y[0] = avant l'échelon), du = amplitude de l'échelon */
+/* y: speeds measured after the step (y[0] = before the step), du = step amplitude */
 int  tune_identify(const float *y, int n, float Ts, float du, fopdt_t *model);
-/* tauc : rapidité voulue en boucle fermée (s) ; renvoie kp, ki */
+/* tauc: desired closed-loop time constant (s); returns kp, ki */
 void tune_simc(const fopdt_t *m, float tauc, float *kp, float *ki);
 
 #ifdef __cplusplus

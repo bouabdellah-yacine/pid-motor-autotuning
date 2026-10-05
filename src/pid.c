@@ -12,17 +12,17 @@ float pid_update(pid_ctrl_t *p, float sp, float y) {
   float e = sp - y;
   if (p->first) { p->prev_meas = y; p->first = 0; }
 
-  /* dérivée sur la mesure, filtrée au 1er ordre */
+  /* derivative on measurement, first-order filtered */
   float d_raw = -p->kd * (y - p->prev_meas) / p->Ts;
   float a = p->Ts / (p->tf + p->Ts);
   p->deriv += a * (d_raw - p->deriv);
   p->prev_meas = y;
 
-  float v = p->kp * e + p->integ + p->deriv;              /* commande non saturée */
+  float v = p->kp * e + p->integ + p->deriv;              /* unsaturated output */
   float u = v < p->umin ? p->umin : (v > p->umax ? p->umax : v);
 
-  /* intégrale + anti-windup par recalcul : on « dégonfle » l'intégrale de
-     l'excès de commande que l'actionneur ne peut pas fournir */
+  /* integral + back-calculation anti-windup: bleed off the integrator by the
+     excess output that the actuator cannot deliver */
   p->integ += p->ki * p->Ts * e;
   if (p->antiwindup && p->ki > 0 && p->kp > 0) {
     float tt = 0.5f * p->kp / p->ki;                    /* Tt = Ti / 2 */
