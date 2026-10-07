@@ -1,6 +1,6 @@
 # 🎛️ PID Motor Speed Controller with Auto-Tuning (ESP32 + FreeRTOS)
 
-[![Tests](https://github.com/bouabdellah-yacine/pid-motor-autotuning/actions/workflows/ci.yml/badge.svg)](https://github.com/bouabdellah-yacine/pid-motor-autotuning/actions/workflows/ci.yml)
+[![Tests](https://github.com/bouabdallah-yacine/pid-motor-autotuning/actions/workflows/ci.yml/badge.svg)](https://github.com/bouabdallah-yacine/pid-motor-autotuning/actions/workflows/ci.yml)
 
 An ESP32 holds the speed of a DC motor exactly at the setpoint, even when the shaft is braked.
 A single button starts **auto-tuning**: the board identifies the motor on its own, then computes the
